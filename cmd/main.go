@@ -1,9 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -11,48 +11,15 @@ import (
 	bencode "github.com/jackpal/bencode-go"
 )
 
-var ErrInvalidFormat = errors.New("invalid bencode format")
-
-// Function to decode bencoded data
-
-func parseTorrentFile(filename string) (map[string]interface{}, error) {
-	result := make(map[string]interface{})
-
-	if !strings.HasSuffix(filename, ".torrent") {
-		return nil, errors.New("torrent file is invalid")
-	}
-
-	fileData, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
-
-	bencodedData := string(fileData)
-	torrentData, _, err := decodeBencode(bencodedData)
-	if err != nil {
-		return nil, err
-	}
-
-	if dict, ok := torrentData.(map[string]interface{}); ok {
-		if url, found := dict["announce"]; found {
-			result["url"] = url
-		}
-
-		h := sha1.New()
-
-		h.Write(dict["info"].([]byte))
-		result["hash"] = h.Sum(nil)
-		if info, found := dict["info"]; found {
-			if infoDict, ok := info.(map[string]interface{}); ok {
-				result["size"] = infoDict["length"]
-			}
-		}
-
-	} else {
-		return nil, ErrInvalidFormat
-	}
-
-	return result, nil
+type MetaInfo struct {
+	Name        string
+	Pieces      string
+	Length      int64
+	PieceLength int64
+}
+type Meta struct {
+	Announce string
+	Info     MetaInfo
 }
 
 func main() {
@@ -77,13 +44,26 @@ func main() {
 		fmt.Println(string(jsonData))
 
 	} else if command == "info" {
-		torrentDict, err := parseTorrentFile(os.Args[2])
+
+		fileName := os.Args[2]
+		f, err := os.ReadFile(fileName)
 		if err != nil {
-			return
+			panic(err)
 		}
-		fmt.Printf("Tracker URL: %s\n", torrentDict["url"])
-		fmt.Printf("Length: %d\n", torrentDict["size"])
-		fmt.Printf("Info Hash: %x\n", torrentDict["hash"])
+
+		var meta Meta
+		err = bencode.Unmarshal(bytes.NewReader(f), &meta)
+		if err != nil {
+			panic(err)
+
+		}
+		h := sha1.New()
+
+		bencode.Marshal(h, meta.Info)
+
+		fmt.Println("Tracker URL:", meta.Announce)
+		fmt.Println("Length:", meta.Info.Length)
+		fmt.Printf("Info Hash: %x\n", h.Sum(nil))
 
 	} else {
 		fmt.Printf("Unknown command: %s\n", command)
