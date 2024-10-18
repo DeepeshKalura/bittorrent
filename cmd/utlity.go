@@ -9,7 +9,7 @@ import (
 	"net"
 )
 
-func downloadFile(conn net.Conn, torrent Meta, index int) []byte {
+func downloadPiece(conn net.Conn, meta Meta, index int) []byte {
 	defer conn.Close()
 
 	// wait for the bitfield message (id = 5)
@@ -30,7 +30,7 @@ func downloadFile(conn net.Conn, torrent Meta, index int) []byte {
 	}
 	peerMessage.id = payloadBuf[0]
 
-	fmt.Printf("Received message: %v\n", peerMessage)
+	// fmt.Printf("Received message: %v\n", peerMessage)
 	if peerMessage.id != 5 {
 		fmt.Println("Expected bitfield message")
 		return nil
@@ -60,7 +60,7 @@ func downloadFile(conn net.Conn, torrent Meta, index int) []byte {
 	}
 	peerMessage.id = payloadBuf[0]
 
-	fmt.Printf("Received message: %v\n", peerMessage)
+	// fmt.Printf("Received message: %v\n", peerMessage)
 	if peerMessage.id != 1 {
 		fmt.Println(buf)
 		fmt.Println("Expected unchoke message")
@@ -69,14 +69,14 @@ func downloadFile(conn net.Conn, torrent Meta, index int) []byte {
 
 	// send request message (id = 6) for each block
 	// Break the piece into blocks of 16 kiB (16 * 1024 bytes) and send a request message for each block
-	pieceSize := torrent.Info.PieceLength
-	pieceCnt := int(math.Ceil(float64(torrent.Info.Length) / float64(pieceSize)))
+	pieceSize := meta.Info.PieceLength
+	pieceCnt := int(math.Ceil(float64(meta.Info.Length) / float64(pieceSize)))
 	if index == pieceCnt-1 {
-		pieceSize = torrent.Info.Length % torrent.Info.PieceLength
+		pieceSize = meta.Info.Length % meta.Info.PieceLength
 	}
 	blockSize := 16 * 1024
 	blockCnt := int(math.Ceil(float64(pieceSize) / float64(blockSize)))
-	fmt.Printf("File Length: %d, Piece Length: %d, Piece Count: %d, Block Size: %d, Block Count: %d\n", torrent.Info.Length, torrent.Info.PieceLength, pieceCnt, blockSize, blockCnt)
+	// fmt.Printf("File Length: %d, Piece Length: %d, Piece Count: %d, Block Size: %d, Block Count: %d\n", torrent.Info.Length, torrent.Info.PieceLength, pieceCnt, blockSize, blockCnt)
 	var data []byte
 	for i := 0; i < blockCnt; i++ {
 		blockLength := blockSize
@@ -98,7 +98,7 @@ func downloadFile(conn net.Conn, torrent Meta, index int) []byte {
 			fmt.Println(err)
 			return nil
 		}
-		fmt.Println("Sent request message", peerMessage)
+		// fmt.Println("Sent request message", peerMessage)
 
 		// wait for piece message (id = 7)
 		resBuf := make([]byte, 4)
@@ -117,7 +117,7 @@ func downloadFile(conn net.Conn, torrent Meta, index int) []byte {
 			return nil
 		}
 		peerMessage.id = payloadBuf[0]
-		fmt.Printf("Received message: %v\n", peerMessage)
+		// fmt.Printf("Received message: %v\n", peerMessage)
 
 		data = append(data, payloadBuf[9:]...)
 	}
