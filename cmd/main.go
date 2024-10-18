@@ -13,11 +13,20 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	bencode "github.com/jackpal/bencode-go"
 )
+
+type PeerMessage struct {
+	lengthPrefix uint32
+	id           uint8
+	index        uint32
+	begin        uint32
+	length       uint32
+}
 
 type MetaInfo struct {
 	Name        string `bencode:"name"`
@@ -35,7 +44,7 @@ type TrackerResponse struct {
 	Peers    string `json:"peers"`
 }
 
-func discoverPeers(file []byte) (TrackerResponse, error) {
+func discoverPeers(file []byte, peerId interface{}) (TrackerResponse, error) {
 
 	var meta Meta
 
@@ -53,9 +62,13 @@ func discoverPeers(file []byte) (TrackerResponse, error) {
 
 	infoHashBytes, _ := hex.DecodeString(infoHash)
 
+	if peerId == nil {
+		peerId = randomString(20)
+	}
+
 	params := url.Values{}
 	params.Add("info_hash", string(infoHashBytes))
-	params.Add("peer_id", randomString(20))
+	params.Add("peer_id", peerId.(string))
 	params.Add("port", "6881")
 	params.Add("uploaded", "0")
 	params.Add("downloaded", "0")
@@ -154,7 +167,7 @@ func main() {
 			panic(err)
 		}
 
-		result, err = discoverPeers(f)
+		result, err = discoverPeers(f, nil)
 
 		if err != nil {
 			panic(err)
@@ -231,6 +244,99 @@ func main() {
 			panic(err)
 		}
 		fmt.Printf("Peer ID: %s\n", hex.EncodeToString(response[48:]))
+
+	case "download_piece":
+		args := os.Args[2:]
+
+		peerId := randomString(20)
+
+		var torrentFile, outputPath string
+
+		if args[0] == "-o" {
+			torrentFile = args[2]
+			outputPath = args[1]
+		} else {
+			torrentFile = args[0]
+			outputPath = "."
+		}
+
+		f, err := os.ReadFile(torrentFile)
+
+		if err != nil {
+			panic(err)
+		}
+
+		var meta Meta
+
+		err = bencode.Unmarshal(bytes.NewReader(f), &meta)
+
+		if err != nil {
+			panic(err)
+		}
+
+		h := sha1.New()
+
+		bencode.Marshal(h, meta.Info)
+
+		infoHash := hex.EncodeToString(h.Sum(nil))
+
+		infoHashBytes, _ := hex.DecodeString(infoHash)
+
+		peers, err := discoverPeers(f, peerId)
+
+		if err != nil {
+			panic(err)
+		}
+
+		peerIp := fmt.Sprintf("%d.%d.%d.%d", peers.Peers[0], peers.Peers[1], peers.Peers[2], peers.Peers[3])
+
+		peerPort := int(peers.Peers[4])<<8 | int(peers.Peers[5])
+		peerPortStr := fmt.Sprintf("%d", peerPort)
+
+		conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", peerIp, peerPortStr))
+
+		reserveByte := make([]byte, 8)
+		pstrlen := byte(19)
+
+		handshake := append([]byte{pstrlen}, []byte("BitTorrent protocol")...)
+
+		handshake = append(handshake, reserveByte...)
+
+		handshake = append(handshake, infoHashBytes...)
+
+		handshake = append(handshake, []byte(peerId)...)
+
+		_, err = conn.Write(handshake)
+		if err != nil {
+			panic(err)
+		}
+
+		// Receive handshake response
+		response := make([]byte, 68)
+		_, err = conn.Read(response)
+		if err != nil {
+			panic(err)
+		}
+
+		// fmt.Printf("Peer ID: %s\n", hex.EncodeToString(response[48:]))
+
+		ind, _ := strconv.Atoi(args[3])
+
+		data := downloadFile(conn, meta, ind)
+
+		file, err := os.Create(outputPath)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		defer file.Close()
+
+		_, err = file.Write(data)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Printf("Piece downloaded to %s.\n", outputPath)
 
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
