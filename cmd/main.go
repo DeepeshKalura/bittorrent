@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -164,14 +165,72 @@ func main() {
 			if i+6 > len(peersBinary) {
 				break
 			}
-			// First 4 bytes represent the IP address
 			ip := fmt.Sprintf("%d.%d.%d.%d", peersBinary[i], peersBinary[i+1], peersBinary[i+2], peersBinary[i+3])
-			// Next 2 bytes represent the port (big-endian)
 			port := binary.BigEndian.Uint16(peersBinary[i+4 : i+6])
 
-			// Print the peer in "IP:Port" format
 			fmt.Printf("%s:%d\n", ip, port)
 		}
+
+	case "handshake":
+
+		filename := os.Args[2]
+		peerAdress := os.Args[3]
+
+		f, err := os.ReadFile(filename)
+
+		if err != nil {
+			panic(err)
+		}
+
+		var meta Meta
+
+		err = bencode.Unmarshal(bytes.NewReader(f), &meta)
+
+		if err != nil {
+			panic(err)
+		}
+
+		conn, err := net.Dial("tcp", peerAdress)
+
+		if err != nil {
+			panic(err)
+		}
+
+		defer conn.Close()
+
+		h := sha1.New()
+
+		bencode.Marshal(h, meta.Info)
+
+		infoHash := hex.EncodeToString(h.Sum(nil))
+
+		infoHashBytes, _ := hex.DecodeString(infoHash)
+
+		peerId := randomString(20)
+
+		reserveByte := make([]byte, 8)
+		pstrlen := byte(19)
+
+		handshake := append([]byte{pstrlen}, []byte("BitTorrent protocol")...)
+
+		handshake = append(handshake, reserveByte...)
+
+		handshake = append(handshake, infoHashBytes...)
+
+		handshake = append(handshake, []byte(peerId)...)
+
+		_, err = conn.Write(handshake)
+		if err != nil {
+			panic(err)
+		}
+
+		// Receive handshake response
+		response := make([]byte, 68)
+		_, err = conn.Read(response)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Printf("Peer ID: %s\n", hex.EncodeToString(response[48:]))
 
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
